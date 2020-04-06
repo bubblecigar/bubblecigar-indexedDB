@@ -87,6 +87,16 @@ const IDBContext = () => {
   const [name, setName] = React.useState('test-db')
   const [version, setVersion] = React.useState(1)
   const [idb, setIdb] = React.useState(null)
+  React.useEffect(
+    () => {
+      if (!idb) return
+      idb.addEventListener(
+        'versionchange', e => {
+          pushEvent(e)
+        }
+      )
+    }, [idb]
+  )
 
   const [eventQueue, setEventQueue] = React.useState([])
   const eventQueueRef = React.useRef([])
@@ -104,10 +114,6 @@ const IDBContext = () => {
     setVersion(e.target.value)
   }
   const onOpen = e => {
-    if (idb) {
-      idb.close()
-    }
-
     const openRequest = window.indexedDB.open(name, version)
     openRequest.addEventListener('success', e => {
       pushEvent(e)

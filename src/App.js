@@ -70,7 +70,7 @@ const EventCardItem = styled.div`
 const EventCard = ({ event }) => {
   return (
     <EventCardStyle>
-      <EventCardItem background={mainColor} color='#fff'>
+      <EventCardItem background={stringifyObject(event).includes('custom') ? 'goldenrod' : mainColor} color='#fff'>
         {stringifyObject(event.target)}
       </EventCardItem>
       <EventCardItem>
@@ -121,16 +121,11 @@ const IDBContext = () => {
           target: idb,
           toString: () => '[object customCloseEvent]'
         })
+        setIdb(null)
       }
     }, [idb, pushEvent]
   )
 
-  const onNameChange = e => {
-    setName(e.target.value)
-  }
-  const onVersionChange = e => {
-    setVersion(e.target.value)
-  }
   const onOpen = e => {
     const openRequest = window.indexedDB.open(name, version)
     openRequest.addEventListener('success', e => {
@@ -141,6 +136,7 @@ const IDBContext = () => {
           target: idb,
           toString: () => '[object customCloseEvent]'
         })
+        setIdb(null)
       }
       setIdb(e.currentTarget.result)
       pushEvent(e)
@@ -150,43 +146,67 @@ const IDBContext = () => {
     })
     openRequest.addEventListener('upgradeneeded', e => {
       pushEvent(e)
+      const idb = e.target.result
+      const stores = ['store A', 'store B', 'store C', 'store D', 'store E']
+      stores.forEach(
+        store => {
+          if (!idb.objectStoreNames.contains(store)) {
+            idb.createObjectStore(store, { keyPath: 'id' })
+          }
+        }
+      )
     })
     openRequest.addEventListener('blocked', e => {
-      console.log('e:', e)
       pushEvent(e)
       idb && idb.close() && pushEvent({
         type: 'close',
         target: idb,
         toString: () => '[object customCloseEvent]'
       })
+      setIdb(null)
     })
+  }
+
+  const clearEventLog = () => {
+    eventQueueRef.current = []
+    syncQueue()
   }
 
   const onDelete = e => {
     const deleteRequest = window.indexedDB.deleteDatabase(name)
     deleteRequest.addEventListener('success', e => {
       pushEvent(e)
+      setIdb(null)
     })
     deleteRequest.addEventListener('error', e => {
       pushEvent(e)
     })
   }
 
+  const openBtnRef = React.useCallback(
+    ref => {
+      if (ref) {
+        ref.click()
+      }
+    }, []
+  )
+
   return (
     <>
       <p>
         <input
           placeholder='database name'
-          value={name} onChange={onNameChange}
+          value={name} onChange={e => setName(e.target.value)}
         />
         <input
           style={{ width: '40px' }}
           placeholder='version'
           type='number' min={1}
-          value={version} onChange={onVersionChange}
+          value={version} onChange={e => setVersion(e.target.value)}
         />
-        <button onClick={onOpen}>open</button>
+        <button ref={openBtnRef} onClick={onOpen}>open</button>
         <button onClick={onDelete}>delete</button>
+        <button onClick={clearEventLog}>clear log</button>
       </p>
       <EventCardContainer>
         {
@@ -202,6 +222,192 @@ const IDBContext = () => {
           </p>
         )
       }
+      {idb && <ObjectStore idb={idb} />}
+    </>
+  )
+}
+
+const FlexRow = styled.div`
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-evenly;
+  align-items: center;
+  margin: 10px;
+  max-width: 100%;
+`
+const SelectableCard = styled.div`
+  border: 1px solid black;
+  padding: 10px;
+  background-color: ${props => props.selected ? mainColor : 'white'};
+  color: ${props => props.selected ? 'white' : mainColor};
+`
+const ObjectStore = ({ idb }) => {
+  const stores = React.useMemo(
+    () => {
+      const stores = []
+      for (let i = 0; i < idb.objectStoreNames.length; i++) {
+        stores.push(idb.objectStoreNames[i])
+      }
+      return stores
+    }, [idb]
+  )
+  const [store, setStore] = React.useState('store A')
+
+  return (
+    <>
+      <FlexRow>
+        {
+          stores.map(
+            s => (
+              <SelectableCard
+                key={s}
+                onClick={() => setStore(s)}
+                selected={s === store}
+              >
+                {s}
+              </SelectableCard>
+            )
+          )
+        }
+      </FlexRow>
+      {store && <Transaction idb={idb} store={store} />}
+    </>
+  )
+}
+
+const Transaction = ({ idb, store }) => {
+  const rollItem = () => {
+    return ({
+      id: Math.random().toFixed(2),
+      name: Math.random().toFixed(2)
+    })
+  }
+
+  const put = (store, item) => {
+    const transaction = idb.transaction(store, 'readwrite')
+
+    const objectStore = transaction.objectStore(store)
+    const request = objectStore.put(item)
+    request.onsuccess = () => console.log(request.result)
+    request.onerror = () => console.log(request.result)
+
+    transaction.oncomplete = () => {
+      readStore(store)
+    }
+  }
+
+  const [values, setValues] = React.useState([])
+  const readStore = React.useCallback(
+    store => new Promise(
+      (resolve, reject) => {
+        const transaction = idb.transaction(store, 'readonly')
+        const objectStore = transaction.objectStore(store)
+        const request = objectStore.getAllKeys()
+        request.onsuccess = e => {
+          resolve([...e.target.result])
+        }
+      }
+    ).then(
+      keys => new Promise(
+        (resolve, reject) => {
+          if (keys.length === 0) {
+            resolve([])
+          }
+          const values = []
+          for (let i = 0; i < keys.length; i++) {
+            const transaction = idb.transaction(store, 'readonly')
+            const objectStore = transaction.objectStore(store)
+            const request = objectStore.get(keys[i])
+            request.onsuccess = e => {
+              values.push(e.target.result)
+              if (values.length === keys.length) {
+                resolve(values)
+              }
+            }
+          }
+        }
+      ).then(
+        values => setValues(values)
+      )
+    ), [idb]
+  )
+
+  React.useEffect(
+    () => {
+      setValues([])
+    }, [store]
+  )
+  React.useEffect(
+    () => {
+      readStore(store)
+    }, [idb, store, readStore]
+  )
+
+  const deleteItem = (store, key) => {
+    const transaction = idb.transaction(store, 'readwrite')
+    const objectStore = transaction.objectStore(store)
+    const request = objectStore.delete(key)
+    request.onsuccess = () => console.log(request.result)
+    request.onerror = () => console.log(request.result)
+    transaction.oncomplete = () => {
+      readStore(store)
+    }
+  }
+
+  const clearStore = store => {
+    const transaction = idb.transaction(store, 'readwrite')
+    const objectStore = transaction.objectStore(store)
+    const request = objectStore.clear()
+    request.onsuccess = () => console.log(request.result)
+    request.onerror = () => console.log(request.result)
+    transaction.oncomplete = () => {
+      readStore(store)
+    }
+  }
+
+  return (
+    <div>
+      <button onClick={() => put(store, rollItem())}>put</button>
+      <button onClick={() => { clearStore(store) }}>clear all</button>
+      <EventCardContainer>
+        {
+          values.map(
+            value => (
+              <ItemCardStyle key={value.id} onClick={() => { deleteItem(store, value.id) }}>
+                <ItemCard
+                  item={value}
+                />
+              </ItemCardStyle>
+            )
+          )
+        }
+      </EventCardContainer>
+    </div>
+  )
+}
+
+const ItemCardStyle = styled.div`
+  margin: 10px;
+  border: 1px solid black;
+  
+  > div {
+    padding: 8px;
+  }
+
+  > div:first-child {
+    background-color: ${mainColor};
+    color: white;
+  }
+`
+const ItemCard = ({ item }) => {
+  return (
+    <>
+      <div>
+        {item.id}
+      </div>
+      <div>
+        {item.name}
+      </div>
     </>
   )
 }

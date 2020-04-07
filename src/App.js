@@ -217,15 +217,32 @@ const IDBContext = () => {
       </EventCardContainer>
       {
         idb && (
-          <p>
-            Opened database: {idb.name}, version: {idb.version}
-          </p>
+          <Banner>
+            <span>
+              {idb.name}
+            </span>
+            <small>vers. {idb.version}</small>
+          </Banner>
         )
       }
       {idb && <ObjectStore idb={idb} />}
     </>
   )
 }
+const Banner = styled.div`
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 20px;
+  max-width: 100%;
+  background-color: ${mainColor};
+  color: white;
+  > span {
+    margin: 5px;
+    font-size: 30px;
+  }
+`
 
 const FlexRow = styled.div`
   display: flex;
@@ -238,8 +255,8 @@ const FlexRow = styled.div`
 const SelectableCard = styled.div`
   border: 1px solid black;
   padding: 10px;
-  background-color: ${props => props.selected ? mainColor : 'white'};
-  color: ${props => props.selected ? 'white' : mainColor};
+  background-color: ${props => props.selected ? 'gold' : 'white'};
+  color: ${props => props.selected ? 'black' : mainColor};
 `
 const ObjectStore = ({ idb }) => {
   const stores = React.useMemo(

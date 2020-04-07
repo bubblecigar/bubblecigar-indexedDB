@@ -86,26 +86,44 @@ const EventCard = ({ event }) => {
 const IDBContext = () => {
   const [name, setName] = React.useState('test-db')
   const [version, setVersion] = React.useState(1)
+
+  const [eventQueue, setEventQueue] = React.useState([])
+  const eventQueueRef = React.useRef([])
+  const syncQueue = React.useCallback(
+    () => setEventQueue([...eventQueueRef.current]), [setEventQueue]
+  )
+
+  const pushEvent = React.useCallback(
+    event => {
+      eventQueueRef.current.push(event)
+      syncQueue()
+    }, [syncQueue]
+  )
+
   const [idb, setIdb] = React.useState(null)
   React.useEffect(
     () => {
       if (!idb) return
-      idb.addEventListener(
-        'versionchange', e => {
-          pushEvent(e)
-        }
-      )
-    }, [idb]
+      idb.onclose = e => {
+        pushEvent(e)
+      }
+      idb.onabort = e => {
+        pushEvent(e)
+      }
+      idb.onerror = e => {
+        pushEvent(e)
+      }
+      idb.onversionchange = e => {
+        pushEvent(e)
+        e.currentTarget.close()
+        pushEvent({
+          type: 'close',
+          target: idb,
+          toString: () => '[object customCloseEvent]'
+        })
+      }
+    }, [idb, pushEvent]
   )
-
-  const [eventQueue, setEventQueue] = React.useState([])
-  const eventQueueRef = React.useRef([])
-  const pushEvent = event => {
-    eventQueueRef.current.push(event)
-    syncQueue()
-  }
-
-  const syncQueue = () => setEventQueue([...eventQueueRef.current])
 
   const onNameChange = e => {
     setName(e.target.value)
@@ -116,37 +134,42 @@ const IDBContext = () => {
   const onOpen = e => {
     const openRequest = window.indexedDB.open(name, version)
     openRequest.addEventListener('success', e => {
-      pushEvent(e)
+      if (idb) {
+        idb.close()
+        pushEvent({
+          type: 'close',
+          target: idb,
+          toString: () => '[object customCloseEvent]'
+        })
+      }
       setIdb(e.currentTarget.result)
+      pushEvent(e)
     })
     openRequest.addEventListener('error', e => {
       pushEvent(e)
-      setIdb(null)
     })
     openRequest.addEventListener('upgradeneeded', e => {
       pushEvent(e)
     })
+    openRequest.addEventListener('blocked', e => {
+      console.log('e:', e)
+      pushEvent(e)
+      idb && idb.close() && pushEvent({
+        type: 'close',
+        target: idb,
+        toString: () => '[object customCloseEvent]'
+      })
+    })
   }
-  const onDelete = e => {
-    if (idb) {
-      idb.close()
-    }
 
+  const onDelete = e => {
     const deleteRequest = window.indexedDB.deleteDatabase(name)
     deleteRequest.addEventListener('success', e => {
       pushEvent(e)
-      setIdb(null)
     })
     deleteRequest.addEventListener('error', e => {
       pushEvent(e)
-      setIdb(null)
     })
-  }
-  const onClose = e => {
-    if (idb) {
-      idb.close()
-      setIdb(null)
-    }
   }
 
   return (
@@ -164,12 +187,7 @@ const IDBContext = () => {
         />
         <button onClick={onOpen}>open</button>
         <button onClick={onDelete}>delete</button>
-        <button onClick={onClose}>close</button>
       </p>
-      {eventQueue.length
-        ? (
-          <button onClick={() => setEventQueue([])}>clear event log</button>
-        ) : null}
       <EventCardContainer>
         {
           eventQueue.map(
